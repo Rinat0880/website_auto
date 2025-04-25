@@ -25,3 +25,4 @@ build/
 # Local configuration
 .env
 *.log
+config.py
