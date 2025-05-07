@@ -4,11 +4,12 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 
 #-------- логин и пароль в config.py редактяться
 
-from config import login, password, subject_name
+from config import login, password, subject_names
 
 #--------
 service = Service(executable_path="chromedriver.exe")
@@ -17,7 +18,6 @@ driver = webdriver.Chrome(service=service)
 driver.get("https://elcampus.otemae.ac.jp/")
 wait = WebDriverWait(driver, 5).until(
     EC.presence_of_element_located((By.NAME, "login_id"))
-
 )
 input_element = driver.find_element(By.NAME, "login_id")
 input_element.clear()
@@ -30,7 +30,7 @@ input_element.send_keys(password)
 button = driver.find_element(By.ID, "msg_btn_login")
 button.click()
 
-for subject_index, current_subject in enumerate(subject_name):
+for subject_index, current_subject in enumerate(subject_names):
     if subject_index > 0:
         print(f"переходим к след предмету: {current_subject}")
         link = driver.find_element(By.LINK_TEXT, "ホーム")
@@ -44,7 +44,7 @@ for subject_index, current_subject in enumerate(subject_name):
     lesson_link = portal_div.find_element(By.LINK_TEXT, current_subject)
     lesson_link.click()
 
-    wait = WebDriverWait(driver, 5).until(
+    wait = WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.LINK_TEXT, "授業"))
     )
     link = driver.find_element(By.LINK_TEXT, "授業")
@@ -124,6 +124,11 @@ for subject_index, current_subject in enumerate(subject_name):
                             time.sleep(10) # вот здесь можно поменять время ожидания открытия сайта с уроками после того как закрывается видео 
                             
                             break
+
+                        except NoSuchElementException:
+                            print("mi popali v blok kogda video nedostupno1 либо предмет не успел появится и драйвер не нашел кнопку (попробуй удлинить время ожидания)")
+                            found_unwatched = False
+                            break
                             
                         except Exception as e:
                             print(f"ошибка при просмотре видео {i}: {e}")
@@ -144,7 +149,7 @@ for subject_index, current_subject in enumerate(subject_name):
 
     print(f"просмотрено - {videos_watched} видео у предмета - '{current_subject}'")
 
-    if subject_index == len(subject_name) - 1:
+    if subject_index == len(subject_names) - 1:
         print("все предметы абработаны.")
         break
 
