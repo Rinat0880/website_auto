@@ -37,7 +37,7 @@ for subject_index, current_subject in enumerate(subject_names):
         link.click()
         time.sleep(3)
     
-    portal_div = WebDriverWait(driver, 10).until(
+    portal_div = WebDriverWait(driver, 15).until(
         EC.presence_of_element_located((By.CLASS_NAME, "subject_list"))
     )
 
@@ -52,9 +52,10 @@ for subject_index, current_subject in enumerate(subject_names):
 
     time.sleep(5)
 
-    wait = WebDriverWait(driver, 10).until(
+    wait = WebDriverWait(driver, 15).until(
         EC.presence_of_element_located((By.CLASS_NAME, "lesson_name"))
     )
+    time.sleep(2)
     lesson_blocks = driver.find_elements(By.CLASS_NAME, "lesson_name")
 
     for i in range(1, 16):
@@ -63,6 +64,7 @@ for subject_index, current_subject in enumerate(subject_names):
             if lesson_number in block.text:
                 print(f"нажимаем на блок урока: {lesson_number}")
                 try:
+                    time.sleep(0.5)
                     block.click()
                     time.sleep(1)
                 except Exception as e:
