@@ -134,18 +134,18 @@ class VideoAutomation:
             WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "lesson_name"))
             )
-            time.sleep(2)
+            time.sleep(3)
             
             lesson_blocks = self.driver.find_elements(By.CLASS_NAME, "lesson_name")
             opened_lessons = 0
             
             for i in range(1, 16):
-                lesson_number = f"第{i}回"
+                lesson_number = f"第{i}"
                 
                 for block in lesson_blocks:
                     if lesson_number in block.text:
                         try:
-                            time.sleep(0.5)
+                            time.sleep(1)
                             block.click()
                             opened_lessons += 1
                             logger.info(f"Открыт блок урока: {lesson_number}")
@@ -154,8 +154,8 @@ class VideoAutomation:
                         except Exception as e:
                             logger.warning(f"Не удалось открыть блок {lesson_number}: {e}")
                             break
-                else:
-                    logger.info(f"Блок урока {lesson_number} не найден")
+                    else:
+                        logger.info(f"Блок урока {lesson_number} не найден")
             
             logger.info(f"Открыто блоков уроков: {opened_lessons}")
             return True
