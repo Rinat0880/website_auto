@@ -44,7 +44,8 @@ class CampusAutomation:
         self.wait_timeout = 15
         self.video_open_delay = 10
         self.video_close_delay = 10
-        self.test_delay = 3
+        self.test_open_delay = 10
+        self.test_delay = 5
         self.mode = mode
         
     def setup_driver(self):
@@ -149,6 +150,7 @@ class CampusAutomation:
             
             for i in range(1, 16):
                 lesson_number = f"第{i}"
+                block_found = False
                 
                 for block in lesson_blocks:
                     if lesson_number in block.text:
@@ -158,12 +160,15 @@ class CampusAutomation:
                             opened_lessons += 1
                             logger.info(f"Открыт блок урока: {lesson_number}")
                             time.sleep(1)
+                            block_found = True
                             break
                         except Exception as e:
                             logger.warning(f"Не удалось открыть блок {lesson_number}: {e}")
+                            block_found = True
                             break
-                    else:
-                        logger.info(f"Блок урока {lesson_number} не найден")
+                            
+                if not block_found:
+                    logger.debug(f"Блок урока {lesson_number} не найден")
             
             logger.info(f"Открыто блоков уроков: {opened_lessons}")
             return True
@@ -193,6 +198,28 @@ class CampusAutomation:
             
             if original_window in self.driver.window_handles:
                 self.driver.switch_to.window(original_window)
+
+    @contextmanager
+    def test_window_context(self, original_window):
+        test_window = None
+        try:
+            # Поиск нового окна
+            for window_handle in self.driver.window_handles:
+                if window_handle != original_window:
+                    test_window = window_handle
+                    self.driver.switch_to.window(test_window)
+                    logger.debug("Переключение на окно теста")
+                    break
+            
+            yield test_window
+            
+        finally:
+            # Закрытие окна теста и возврат к основному
+            if test_window and test_window in self.driver.window_handles:
+                self.driver.close()
+            
+            if original_window in self.driver.window_handles:
+                self.driver.switch_to.window(original_window)
     
     def process_videos(self):
         try:
@@ -218,7 +245,7 @@ class CampusAutomation:
                             
                             contents_name_cell = block.find_element(By.CSS_SELECTOR, "td.contents_name a")
                             
-                            if "sttop_iconl_yet.gif" in src:
+                            if "sttop_iconl_yet.gif" in src or "sttop_iconl_notachieve.gif" in src:
                                 found_unwatched = True
                                 consecutive_failures = 0 
                                 
@@ -300,28 +327,36 @@ class CampusAutomation:
                             icon_cell = block.find_element(By.CSS_SELECTOR, "td.state_iconl img")
                             src = icon_cell.get_attribute("src")
                             
-                            contents_name_cell = block.find_element(By.CSS_SELECTOR, "td.contents_name")
+                            contents_name_cell = block.find_element(By.CSS_SELECTOR, "td.contents_name a")
                             test_title = contents_name_cell.text.strip()
                             
-                            if "sttop_iconl_yet.gif" in src:  
+                            if "sttop_iconl_yet.gif" in src or "sttop_iconl_notachieve.gif" in src:
                                 found_unfinished = True
                                 consecutive_failures = 0
                                 
                                 tests_processed += 1
                                 logger.info(f"Найден незавершенный тест {tests_processed}: {test_title}")
+                                contents_name_cell.click()
+                                time.sleep(self.test_open_delay)
                                 
                                 try:
+                                    original_window = self.driver.current_window_handle
                                     test_button = block.find_element(By.CSS_SELECTOR, "a[href*=\"parent.frame_ctrl.go('first_que')\"] img[src*='btn_do.gif']")
                                     test_button.click()
                                     time.sleep(self.test_delay)
                                     
                                     logger.info(f"Нажата кнопка выполнения теста {tests_processed}: {test_title}")
                                     
-                                    # Здесь типо будет как мы будем решать тест через ИИ апи
                                     
-                                    time.sleep(2)
-                                    
-                                    logger.info(f"Тест {tests_processed} обработан: {test_title}")
+                                    with self.test_window_context(original_window) as test_window:
+                                        if test_window:
+                                            # Здесь будет логика решения теста через ИИ апи
+                                            time.sleep(2)
+                                            logger.info(f"Тест {tests_processed} обработан: {test_title}")
+                                        else:
+                                            logger.warning(f"Не удалось открыть тест {tests_processed}: {test_title}")
+                                            tests_processed -= 1
+    
                                     break
                                     
                                 except NoSuchElementException:
