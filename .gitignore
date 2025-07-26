@@ -26,4 +26,3 @@ build/
 .env
 *.log
 config.py
-subject_names_extractor.py
