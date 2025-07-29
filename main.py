@@ -341,7 +341,6 @@ class CampusAutomation:
 
     def process_tests(self):
         try:
-            # Ожидание загрузки страницы с тестами
             WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.presence_of_element_located(
                     (By.CSS_SELECTOR, "div.type_bt, div.type_bw")
@@ -384,35 +383,27 @@ class CampusAutomation:
                                     f"Найден незавершенный тест {tests_processed}: {test_title}"
                                 )
 
-                                # Сохраняем ссылку на главное окно
                                 original_window = self.driver.current_window_handle
 
-                                # Кликаем по ссылке теста - это откроет новое окно
                                 contents_name_cell.click()
                                 time.sleep(self.test_open_delay)
+                                
+                                WebDriverWait(self.driver, 10).until(lambda d: len(d.window_handles) > 1)
+                                new_window = [w for w in self.driver.window_handles if w != original_window][0]
+                                self.driver.switch_to.window(new_window)
 
-                                # Теперь работаем с новым окном
-                                with self.test_window_context(
-                                    original_window
-                                ) as test_window:
+                                with self.test_window_context(original_window) as test_window:
                                     if test_window:
                                         try:
-                                            # Ищем кнопку выполнения теста в НОВОМ окне
-                                            # Вариант 1: Поиск первой ссылки (как в вашем HTML примере)
-                                            test_start_button = WebDriverWait(
-                                                self.driver, 10
-                                            ).until(
-                                                EC.element_to_be_clickable(
-                                                    (By.CSS_SELECTOR, "a:first-of-type")
-                                                )
+                                            iframe1 = WebDriverWait(self.driver, 10).until(
+                                                EC.presence_of_element_located((By.NAME, "frame_main"))
                                             )
-
-                                            # Или вариант 2: Поиск по содержимому href
-                                            # test_start_button = WebDriverWait(self.driver, 10).until(
-                                            #     EC.element_to_be_clickable((By.XPATH, "//a[contains(@href, 'first_que')]"))
-                                            # )
-
-                                            test_start_button.click()
+                                            self.driver.switch_to.frame(iframe1)
+                                            
+                                            start_button_img = WebDriverWait(self.driver, 10).until(
+                                                EC.element_to_be_clickable((By.XPATH, "//img[contains(@src, 'btn_do.gif')]"))
+                                            )
+                                            start_button_img.click()
                                             time.sleep(self.test_delay)
 
                                             logger.info(
