@@ -14,3 +14,6 @@ subject_names = [
 
 # Режим работы: 'video' для просмотра видео, 'test' для решения тестов
 mode = 'test'  # Измените на 'video' для просмотра видео
+
+
+# https://googlechromelabs.github.io/chrome-for-testing/ - скачать ласт версию chrome driver
