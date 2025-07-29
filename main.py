@@ -31,7 +31,7 @@ except ImportError:
     logger.error("Не удалось импортировать config.py. Проверьте наличие файла и параметра 'mode'.")
     exit(1)
 
-# Проверка корректности режима
+# Проверка корректности режима russ pidor
 VALID_MODES = ['video', 'test']
 if mode not in VALID_MODES:
     logger.error(f"Некорректный режим '{mode}'. Допустимые режимы: {VALID_MODES}")
