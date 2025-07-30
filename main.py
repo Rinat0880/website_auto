@@ -1,5 +1,7 @@
 import time
 import logging
+import json
+import requests
 from contextlib import contextmanager
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -26,18 +28,185 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 try:
-    from config import login, password, subject_names, mode
+    from config import login, password, subject_names, mode, gemini_api_key
 except ImportError:
     logger.error(
-        "Не удалось импортировать config.py. Проверьте наличие файла и параметра 'mode'."
+        "Не удалось импортировать config.py. Проверьте наличие файла и параметров."
     )
     exit(1)
 
-# Проверка корректности режима
-VALID_MODES = ["video", "test"]
-if mode not in VALID_MODES:
-    logger.error(f"Некорректный режим '{mode}'. Допустимые режимы: {VALID_MODES}")
-    exit(1)
+# VALID_MODES = ["video", "test"]
+# if mode not in VALID_MODES:
+#     logger.error(f"Некорректный режим '{mode}'. Допустимые режимы: {VALID_MODES}")
+#     exit(1)
+
+
+class AITestSolver:
+
+    def __init__(self, api_key=None):
+        self.api_key = api_key or gemini_api_key
+        self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        logger.info("Инициализирован ИИ решатель тестов с Gemini API")
+    
+    def extract_question_data(self, driver):
+        try:
+            question_data = {
+                'question_text': '',
+                'options': [],
+                'question_type': 'multiple_choice'
+            }
+
+            # print("1: Переключаюсь в frame_main")
+            # frame_main = WebDriverWait(driver, 10).until(
+            #     EC.presence_of_element_located((By.NAME, "frame_main"))
+            # )
+            # driver.switch_to.frame(frame_main)
+
+            print("2: Ищу варианты ответов...")
+            option_elements = driver.find_elements(
+                By.XPATH, '//label[starts-with(@for, "rdo_")]'
+            )
+            for element in option_elements:
+                print("нашёл вариант:", element.text.strip())
+                question_data['options'].append(element.text.strip())
+
+            print("3: Переключаюсь в inlist")
+            iframe_inlist = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "inlist"))
+            )
+            driver.switch_to.frame(iframe_inlist)
+
+            print("4: Ищу текст вопроса")
+            question_elements = driver.find_elements(By.CLASS_NAME, "iframe_body")
+            if question_elements:
+                question_data['question_text'] = question_elements[0].text.strip()
+
+            return question_data
+
+        except Exception as e:
+            print(f"Ошибка при извлечении: {type(e)} — {e}")
+            return None
+
+
+    
+    def solve_question(self, question_data):
+        try:
+            if not question_data or not question_data['question_text'] or not question_data['options']:
+                logger.warning("Недостаточно данных для решения вопроса")
+                return 1
+            
+            options_text = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(question_data['options'])])
+            prompt = f"""Ты эксперт по японским академическим тестам. Проанализируй вопрос и выбери правильный ответ.
+
+Вопрос: {question_data['question_text']}
+
+Варианты ответов:
+{options_text}
+
+Отвечай ТОЛЬКО номером правильного варианта (1, 2, 3 или 4). Никаких объяснений не нужно."""
+
+            request_data = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'X-goog-api-key': self.api_key
+            }
+            
+            response = requests.post(self.api_url, headers=headers, json=request_data, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    content = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                    
+                    # Извлекаем номер ответа
+                    try:
+                        selected_option = int(content)
+                        if 1 <= selected_option <= len(question_data['options']):
+                            logger.info(f"ии выбрал вариант {selected_option} из {len(question_data['options'])}")
+                            return selected_option
+                        else:
+                            logger.warning(f"Gemini вернул неверный номер: {selected_option}")
+                            return 1
+                    except ValueError:
+                        logger.warning(f"Не удалось извлечь номер из ответа Gemini: {content}")
+                        return 1
+                else:
+                    logger.warning("Пустой ответ от Gemini API")
+                    return 1
+            else:
+                logger.error(f"Ошибка Gemini API: {response.status_code} - {response.text}")
+                return 1
+                
+        except requests.exceptions.Timeout:
+            logger.error("Таймаут при запросе к Gemini API")
+            return 1
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка сети при обращении к Gemini API: {e}")
+            return 1
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при решении вопроса через Gemini: {e}")
+            return 1
+    
+    def select_answer(self, driver, option_number):
+        try:
+            radio_buttons = driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+            if radio_buttons and option_number <= len(radio_buttons):
+                radio_buttons[option_number - 1].click()
+                logger.info(f"Выбран вариант {option_number}")
+                return True
+            
+            checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+            if checkboxes and option_number <= len(checkboxes):
+                checkboxes[option_number - 1].click()
+                logger.info(f"Выбран чекбокс {option_number}")
+                return True
+            
+            option_links = driver.find_elements(By.CSS_SELECTOR, f"a[href*='{option_number}'], button[value='{option_number}']")
+            if option_links:
+                option_links[0].click()
+                logger.info(f"Нажата ссылка варианта {option_number}")
+                return True
+            
+            logger.warning(f"Не удалось найти элемент для выбора варианта {option_number}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Ошибка при выборе ответа: {e}")
+            return False
+    
+    def submit_answer(self, driver):
+        """Отправляет ответ"""
+        try:
+            # Поиск кнопки отправки
+            submit_buttons = driver.find_elements(By.CSS_SELECTOR, 
+                "input[type='submit'], button[type='submit'], img[src*='btn_next'], img[src*='btn_submit'], a[href*='submit']")
+            
+            for button in submit_buttons:
+                try:
+                    button.click()
+                    logger.info("Ответ отправлен")
+                    return True
+                except:
+                    continue
+            
+            logger.warning("Кнопка отправки не найдена")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Ошибка при отправке ответа: {e}")
+            return False
 
 
 class CampusAutomation:
@@ -50,6 +219,7 @@ class CampusAutomation:
         self.test_open_delay = 10
         self.test_delay = 5
         self.mode = mode
+        self.ai_solver = AITestSolver()  # Инициализация ИИ решателя
 
     def setup_driver(self):
         try:
@@ -229,6 +399,46 @@ class CampusAutomation:
 
             if original_window in self.driver.window_handles:
                 self.driver.switch_to.window(original_window)
+
+    def solve_test_with_ai(self, test_title):
+        """Решает тест с помощью ИИ"""
+        try:
+            questions_solved = 0
+            max_questions = 50  # Ограничение на количество вопросов
+            
+            while questions_solved < max_questions:
+                # Извлекаем данные вопроса
+                question_data = self.ai_solver.extract_question_data(self.driver)
+                
+                if not question_data or not question_data['question_text']:
+                    logger.info("Вопросы закончились или тест завершен")
+                    break
+                
+                # Решаем вопрос через ИИ
+                selected_option = self.ai_solver.solve_question(question_data)
+                
+                # Выбираем ответ
+                if self.ai_solver.select_answer(self.driver, selected_option):
+                    time.sleep(1)
+                    
+                    # Отправляем ответ
+                    if self.ai_solver.submit_answer(self.driver):
+                        questions_solved += 1
+                        logger.info(f"Решен вопрос {questions_solved} в тесте: {test_title}")
+                        time.sleep(self.test_delay)
+                    else:
+                        logger.warning("Не удалось отправить ответ")
+                        break
+                else:
+                    logger.warning("Не удалось выбрать ответ")
+                    break
+            
+            logger.info(f"Решено вопросов в тесте '{test_title}': {questions_solved}")
+            return questions_solved > 0
+            
+        except Exception as e:
+            logger.error(f"Ошибка при решении теста через ИИ: {e}")
+            return False
 
     def process_videos(self):
         try:
@@ -410,11 +620,15 @@ class CampusAutomation:
                                                 f"Нажата кнопка начала теста {tests_processed}: {test_title}"
                                             )
 
-                                            # Здесь будет логика решения теста через ИИ апи
-                                            time.sleep(2)
-                                            logger.info(
-                                                f"Тест {tests_processed} обработан: {test_title}"
-                                            )
+                                            # Решение теста через ИИ
+                                            if self.solve_test_with_ai(test_title):
+                                                logger.info(
+                                                    f"Тест {tests_processed} успешно решен через ИИ: {test_title}"
+                                                )
+                                            else:
+                                                logger.warning(
+                                                    f"Не удалось полностью решить тест {tests_processed}: {test_title}"
+                                                )
 
                                         except TimeoutException:
                                             logger.warning(
