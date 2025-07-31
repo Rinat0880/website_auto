@@ -127,6 +127,7 @@ class AITestSolver:
             
             if response.status_code == 200:
                 result = response.json()
+                print("Ответ от ИИ: ", result)
                 
                 if 'candidates' in result and len(result['candidates']) > 0:
                     content = result['candidates'][0]['content']['parts'][0]['text'].strip()
@@ -162,59 +163,48 @@ class AITestSolver:
     
     def select_answer(self, driver, option_number):
         try:
-            # radio_buttons = driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
-            # if radio_buttons and 0 < option_number <= len(radio_buttons):
-            #     driver.execute_script("arguments[0].scrollIntoView(true);", radio_buttons[option_number - 1])
-            #     radio_buttons[option_number - 1].click()
-            #     logger.info(f"Выбран радио-вариант {option_number}")
-            #     return True
-            
-            labels = driver.find_elements(By.CSS_SELECTOR, "label[for^='rdo_']")
-            if labels and 0 < option_number <= len(labels):
-                label = labels[option_number - 1]
-                driver.execute_script("arguments[0].scrollIntoView(true);", label)
-                label.click()
-                logger.info(f"Клик по label для варианта {option_number}")
-                return True
-        
-            # checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-            # if checkboxes and option_number <= len(checkboxes):
-            #     checkboxes[option_number - 1].click()
-            #     logger.info(f"Выбран чекбокс {option_number}")
-            #     return True
-            
-            # option_links = driver.find_elements(By.CSS_SELECTOR, f"a[href*='{option_number}'], button[value='{option_number}']")
-            # if option_links:
-            #     option_links[0].click()
-            #     logger.info(f"Нажата ссылка варианта {option_number}")
-            #     return True
-            
-            logger.warning(f"Не удалось найти элемент для выбора варианта {option_number}")
-            return False
-            
+            script = f"""
+            var radios = document.getElementsByName("choice");
+            if (radios.length >= {option_number}) {{
+                radios[{option_number - 1}].click();
+                return true;
+            }} else {{
+                return false;
+            }}
+            """
+            result = driver.execute_script(script)
+            if result:
+                logger.info(f"Выбран вариант ответа №{option_number} через click()")
+            else:
+                logger.warning(f"Вариант №{option_number} не найден среди радио-кнопок")
+            return result
         except Exception as e:
-            logger.error(f"Ошибка при выборе ответа: {e}")
+            logger.error(f"Ошибка при выборе ответа через click(): {e}")
             return False
+
     
     def submit_answer(self, driver):
         try:
-            submit_buttons = driver.find_elements(By.CSS_SELECTOR, 
-                "input[type='submit'], button[type='submit'], img[src*='btn_next'], img[src*='btn_submit'], a[href*='submit']")
-            
-            for button in submit_buttons:
-                try:
-                    button.click()
-                    logger.info("Ответ отправлен")
-                    return True
-                except:
-                    continue
-            
-            logger.warning("Кнопка отправки не найдена")
-            return False
-            
+            is_forward_enabled = driver.execute_script("""
+                const btn = document.getElementById('btn_enabled_forward');
+                return btn && btn.style.display === 'block';
+            """)
+
+            if is_forward_enabled:
+                driver.execute_script("ctrlExecute('forward')")
+                logger.info("Выполнен переход на следующий вопрос")
+            else:
+                driver.execute_script("ctrlExecute('mark')")
+                logger.info("Последний вопрос — тест завершён и отправлен")
+                return True
+
+            time.sleep(1)  
+            return True
+
         except Exception as e:
-            logger.error(f"Ошибка при отправке ответа: {e}")
+            logger.error(f"Ошибка при переходе/отправке: {e}")
             return False
+
 
 
 class CampusAutomation:
@@ -394,7 +384,6 @@ class CampusAutomation:
                 self.driver.switch_to.window(original_window)
 
     def solve_test_with_ai(self, test_title):
-        """Решает тест с помощью ИИ"""
         try:
             questions_solved = 0
             max_questions = 50  
