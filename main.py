@@ -37,7 +37,7 @@ except ImportError:
 
 # VALID_MODES = ["video", "test"]
 # if mode not in VALID_MODES:
-#     logger.error(f"Некорректный режим '{mode}'. Допустимые режимы: {VALID_MODES}")
+#     logger.error(f"Некорректный режим '{mode}'. Допустимые режимы: {VALID_MODES}") -- russ pidor
 #     exit(1)
 
 
