@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 try:
-    from config import login, password, subject_names, mode, gemini_api_key
+    from config import login, password, subject_names, mode, AI_api_key
 except ImportError:
     logger.error(
         "Не удалось импортировать config.py. Проверьте наличие файла и параметров."
@@ -44,9 +44,9 @@ except ImportError:
 class AITestSolver:
 
     def __init__(self, api_key=None):
-        self.api_key = api_key or gemini_api_key
+        self.api_key = api_key or AI_api_key
         self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        logger.info("Инициализирован ИИ решатель тестов с Gemini API")
+        logger.info("Инициализирован ИИ решатель тестов с AI API")
     
     def extract_question_data(self, driver):
         try:
@@ -80,6 +80,7 @@ class AITestSolver:
             question_elements = driver.find_elements(By.CLASS_NAME, "iframe_body")
             if question_elements:
                 question_data['question_text'] = question_elements[0].text.strip()
+                print("вопрос: ", question_data)
 
             return question_data
 
@@ -137,47 +138,56 @@ class AITestSolver:
                             logger.info(f"ии выбрал вариант {selected_option} из {len(question_data['options'])}")
                             return selected_option
                         else:
-                            logger.warning(f"Gemini вернул неверный номер: {selected_option}")
+                            logger.warning(f"AI вернул неверный номер: {selected_option}")
                             return 1
                     except ValueError:
-                        logger.warning(f"Не удалось извлечь номер из ответа Gemini: {content}")
+                        logger.warning(f"Не удалось извлечь номер из ответа AI: {content}")
                         return 1
                 else:
-                    logger.warning("Пустой ответ от Gemini API")
+                    logger.warning("Пустой ответ от AI API")
                     return 1
             else:
-                logger.error(f"Ошибка Gemini API: {response.status_code} - {response.text}")
+                logger.error(f"Ошибка AI API: {response.status_code} - {response.text}")
                 return 1
                 
         except requests.exceptions.Timeout:
-            logger.error("Таймаут при запросе к Gemini API")
+            logger.error("Таймаут при запросе к AI API")
             return 1
         except requests.exceptions.RequestException as e:
-            logger.error(f"Ошибка сети при обращении к Gemini API: {e}")
+            logger.error(f"Ошибка сети при обращении к AI API: {e}")
             return 1
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при решении вопроса через Gemini: {e}")
+            logger.error(f"Неожиданная ошибка при решении вопроса через AI: {e}")
             return 1
     
     def select_answer(self, driver, option_number):
         try:
-            radio_buttons = driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
-            if radio_buttons and option_number <= len(radio_buttons):
-                radio_buttons[option_number - 1].click()
-                logger.info(f"Выбран вариант {option_number}")
-                return True
+            # radio_buttons = driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+            # if radio_buttons and 0 < option_number <= len(radio_buttons):
+            #     driver.execute_script("arguments[0].scrollIntoView(true);", radio_buttons[option_number - 1])
+            #     radio_buttons[option_number - 1].click()
+            #     logger.info(f"Выбран радио-вариант {option_number}")
+            #     return True
             
-            checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-            if checkboxes and option_number <= len(checkboxes):
-                checkboxes[option_number - 1].click()
-                logger.info(f"Выбран чекбокс {option_number}")
+            labels = driver.find_elements(By.CSS_SELECTOR, "label[for^='rdo_']")
+            if labels and 0 < option_number <= len(labels):
+                label = labels[option_number - 1]
+                driver.execute_script("arguments[0].scrollIntoView(true);", label)
+                label.click()
+                logger.info(f"Клик по label для варианта {option_number}")
                 return True
+        
+            # checkboxes = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+            # if checkboxes and option_number <= len(checkboxes):
+            #     checkboxes[option_number - 1].click()
+            #     logger.info(f"Выбран чекбокс {option_number}")
+            #     return True
             
-            option_links = driver.find_elements(By.CSS_SELECTOR, f"a[href*='{option_number}'], button[value='{option_number}']")
-            if option_links:
-                option_links[0].click()
-                logger.info(f"Нажата ссылка варианта {option_number}")
-                return True
+            # option_links = driver.find_elements(By.CSS_SELECTOR, f"a[href*='{option_number}'], button[value='{option_number}']")
+            # if option_links:
+            #     option_links[0].click()
+            #     logger.info(f"Нажата ссылка варианта {option_number}")
+            #     return True
             
             logger.warning(f"Не удалось найти элемент для выбора варианта {option_number}")
             return False
@@ -187,9 +197,7 @@ class AITestSolver:
             return False
     
     def submit_answer(self, driver):
-        """Отправляет ответ"""
         try:
-            # Поиск кнопки отправки
             submit_buttons = driver.find_elements(By.CSS_SELECTOR, 
                 "input[type='submit'], button[type='submit'], img[src*='btn_next'], img[src*='btn_submit'], a[href*='submit']")
             
@@ -320,36 +328,23 @@ class CampusAutomation:
             WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "lesson_name"))
             )
-            time.sleep(3)
+            time.sleep(1)
 
-            lesson_blocks = self.driver.find_elements(By.CLASS_NAME, "lesson_name")
-            opened_lessons = 0
+            phase_codes = self.driver.execute_script("return typeof phaseCodes !== 'undefined' ? phaseCodes : null;")
+            if not phase_codes:
+                logger.error("Массив phaseCodes не найден на странице")
+                return False
 
-            for i in range(1, 16):
-                lesson_number = f"第{i}"
-                block_found = False
+            opened = 0
+            for code in phase_codes:
+                try:
+                    self.driver.execute_script(f"clickTitle('{code}', false);")
+                    logger.info(f"Открыт блок урока с ID: {code}")
+                    opened += 1
+                except Exception as e:
+                    logger.warning(f"Не удалось открыть блок с ID {code}: {e}")
 
-                for block in lesson_blocks:
-                    if lesson_number in block.text:
-                        try:
-                            time.sleep(1)
-                            block.click()
-                            opened_lessons += 1
-                            logger.info(f"Открыт блок урока: {lesson_number}")
-                            time.sleep(1)
-                            block_found = True
-                            break
-                        except Exception as e:
-                            logger.warning(
-                                f"Не удалось открыть блок {lesson_number}: {e}"
-                            )
-                            block_found = True
-                            break
-
-                if not block_found:
-                    logger.debug(f"Блок урока {lesson_number} не найден")
-
-            logger.info(f"Открыто блоков уроков: {opened_lessons}")
+            logger.info(f"Всего открыто блоков: {opened}")
             return True
 
         except Exception as e:
@@ -382,7 +377,6 @@ class CampusAutomation:
     def test_window_context(self, original_window):
         test_window = None
         try:
-            # Поиск нового окна
             for window_handle in self.driver.window_handles:
                 if window_handle != original_window:
                     test_window = window_handle
@@ -393,7 +387,6 @@ class CampusAutomation:
             yield test_window
 
         finally:
-            # Закрытие окна теста и возврат к основному
             if test_window and test_window in self.driver.window_handles:
                 self.driver.close()
 
@@ -404,24 +397,20 @@ class CampusAutomation:
         """Решает тест с помощью ИИ"""
         try:
             questions_solved = 0
-            max_questions = 50  # Ограничение на количество вопросов
+            max_questions = 50  
             
             while questions_solved < max_questions:
-                # Извлекаем данные вопроса
                 question_data = self.ai_solver.extract_question_data(self.driver)
                 
                 if not question_data or not question_data['question_text']:
                     logger.info("Вопросы закончились или тест завершен")
                     break
                 
-                # Решаем вопрос через ИИ
                 selected_option = self.ai_solver.solve_question(question_data)
                 
-                # Выбираем ответ
                 if self.ai_solver.select_answer(self.driver, selected_option):
                     time.sleep(1)
                     
-                    # Отправляем ответ
                     if self.ai_solver.submit_answer(self.driver):
                         questions_solved += 1
                         logger.info(f"Решен вопрос {questions_solved} в тесте: {test_title}")
