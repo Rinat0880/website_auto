@@ -56,11 +56,14 @@ class AITestSolver:
                 'question_type': 'multiple_choice'
             }
 
-            # print("1: Переключаюсь в frame_main")
-            # frame_main = WebDriverWait(driver, 10).until(
-            #     EC.presence_of_element_located((By.NAME, "frame_main"))
-            # )
-            # driver.switch_to.frame(frame_main)
+            try:
+                driver.switch_to.default_content()  
+                frame_main = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.NAME, "frame_main"))
+                )
+                driver.switch_to.frame(frame_main)
+            except Exception as e:
+                print(f"")
 
             print("2: Ищу варианты ответов...")
             option_elements = driver.find_elements(
@@ -167,8 +170,12 @@ class AITestSolver:
                 time.sleep(3)
                 
                 driver.switch_to.default_content()                                 
-                print("пытаемся перейти в фрейм")                                  
-                frame_main = driver.find_element(By.NAME, "frame_main")            # только при поиске мы переходим на фрейм
+                print("пытаемся перейти в фрейм_мейн")                                  
+                # frame_main = driver.find_element(By.NAME, "frame_main")            # только при поиске мы переходим на фрейм
+                # driver.switch_to.frame(frame_main)
+                frame_main = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.NAME, "frame_main"))
+                )
                 driver.switch_to.frame(frame_main)
                 print("попали)")
                 
@@ -200,6 +207,12 @@ class AITestSolver:
     
     def submit_answer(self, driver):
         try:
+            driver.switch_to.default_content()                                 
+            print("пытаемся перейти в фрейм_ктрл")                                  
+            frame_ctrl = driver.find_element(By.NAME, "frame_ctrl")
+            driver.switch_to.frame(frame_ctrl)
+            print("попали)")
+            
             is_forward_enabled = driver.execute_script("""
                 const btn = document.getElementById('btn_enabled_forward');
                 return btn && btn.style.display === 'block';
@@ -211,10 +224,21 @@ class AITestSolver:
             else:
                 driver.execute_script("ctrlExecute('mark')")
                 logger.info("Последний вопрос — тест завершён и отправлен")
+            
+                WebDriverWait(driver, 5).until(EC.alert_is_present())
+                alert = driver.switch_to.alert
+                alert.accept()
+                logger.info("Alert с подтверждением принят")
+                
+                time.sleep(5)
+
+                driver.close()  
+
                 return True
 
             time.sleep(1)  
             return True
+            
 
         except Exception as e:
             logger.error(f"Ошибка при переходе/отправке: {e}")
