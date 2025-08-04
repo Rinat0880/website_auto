@@ -162,25 +162,40 @@ class AITestSolver:
             return 1
     
     def select_answer(self, driver, option_number):
-        try:
-            script = f"""
-            var radios = document.getElementsByName("choice");
-            if (radios.length >= {option_number}) {{
-                radios[{option_number - 1}].click();
-                return true;
-            }} else {{
-                return false;
-            }}
-            """
-            result = driver.execute_script(script)
-            if result:
-                logger.info(f"Выбран вариант ответа №{option_number} через click()")
-            else:
-                logger.warning(f"Вариант №{option_number} не найден среди радио-кнопок")
-            return result
-        except Exception as e:
-            logger.error(f"Ошибка при выборе ответа через click(): {e}")
-            return False
+        while True:
+            try:
+                time.sleep(3)
+                
+                driver.switch_to.default_content()                                 
+                print("пытаемся перейти в фрейм")                                  
+                frame_main = driver.find_element(By.NAME, "frame_main")            # только при поиске мы переходим на фрейм
+                driver.switch_to.frame(frame_main)
+                print("попали)")
+                
+                script = f"""
+                var radios = document.getElementsByClassName("form_radio");
+                if (radios.length >= {option_number}) {{
+                    radios[{option_number - 1}].click();
+                    console.log("we in true");
+                    return true;
+                }} else {{
+                    console.log("we in false");
+                    return false;
+                }}
+                """
+                print(script)
+                result = driver.execute_script(script)
+                print(result)
+                time.sleep(10)
+                if result:
+                    logger.info(f"Выбран вариант ответа №{option_number} через click()")
+                    return True
+                else:
+                    logger.warning(f"Вариант №{option_number} не найден среди радио-кнопок")
+                    time.sleep(5)
+            except Exception as e:
+                logger.error(f"Ошибка при выборе ответа через click(): {e}")
+        print("Nakaaaaaaaaaaaanetsta!!!!!!!!!")
 
     
     def submit_answer(self, driver):
