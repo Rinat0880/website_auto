@@ -1,8 +1,17 @@
+# фалй должен называться config.py
+# https://googlechromelabs.github.io/chrome-for-testing/ - скачать ласт версию chrome driver
+
+
 # заменяйте на свои учетные данные
 login = "your_login_here"
 password = "your_password_here"
 
+
+
+
+
 # вот тут массив предметов
+
 subject_names = [
     "subject1",        
     "subject2",       
@@ -10,10 +19,18 @@ subject_names = [
     "subject4" 
 ]
 
-# фалй должен называться config.py
+
+
 
 # Режим работы: 'video' для просмотра видео, 'test' для решения тестов
-mode = 'test'  # Измените на 'video' для просмотра видео
+
+mode = 'video'  
+# mode = 'test'
 
 
-# https://googlechromelabs.github.io/chrome-for-testing/ - скачать ласт версию chrome driver
+
+
+
+
+# пока скрипт решения тестов работает только с google gemini 2.0, если у вас есть другие api (лучше) можете в class aitestsolver init поменять url на свой и изменить структуру запроса в функции solvequestion
+AI_api_key = 'your_ai_api_key'
