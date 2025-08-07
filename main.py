@@ -104,7 +104,12 @@ class AITestSolver:
                 'question_type': test_type
             }
 
-            print("2: Ищу варианты ответов...")
+            print("2: Ищу варианты ответов... и переходим на мейн")
+            driver.switch_to.default_content()
+            frame_main = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "frame_main"))
+            )
+            driver.switch_to.frame(frame_main) 
             
             if test_type == "checkbox":
                 option_elements = driver.find_elements(
@@ -125,16 +130,19 @@ class AITestSolver:
             iframe_inlist = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.NAME, "inlist"))
             )
+            print("переходим в инлист")
             driver.switch_to.frame(iframe_inlist)
                     
             if test_type == "select":
                 print("Обрабатываем SELECT тест...")
-                select_element = driver.find_element(By.ID, "ans_1")
-                options = select_element.find_elements(By.TAG_NAME, "option")
-                for option in options:
-                    if option.text.strip(): 
-                        print("нашёл вариант (select):", option.text.strip())
-                        question_data['options'].append(option.text.strip())
+                script = f"return document.getElementById('ans_1').length"
+                len_options = driver.execute_script(script)
+                
+                for i in range(1, len_options):
+                    script = f"return document.getElementById('ans_1')[{i}].text"
+                    option_text = driver.execute_script(script)
+                    print(f"нашёл вариант (select): {option_text}")
+                    question_data['options'].append(option_text)
 
             print("4: Ищу текст вопроса")
             question_elements = driver.find_elements(By.CLASS_NAME, "iframe_body")
@@ -268,23 +276,31 @@ class AITestSolver:
                     
             elif self.current_test_type == "select":
                 print("Обрабатываем SELECT выбор...")
-                for option_number in option_numbers:
+                iframe_inlist = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.NAME, "inlist"))
+                )
+                print("переходим в инлист")
+                driver.switch_to.frame(iframe_inlist)
+    
+                for i, option_number in enumerate(option_numbers, 1):
                     script = f"""
-                    var select = document.getElementById("ans_1");
-                    if (select && select.options.length >= {option_number}) {{
-                        select.selectedIndex = {option_number - 1};
-                        select.dispatchEvent(new Event('change'));
-                        console.log("selected option {option_number}");
+                    var select = document.getElementById("ans_{i}");
+                    if (select && select.length >= {option_number}) {{
+                        select.selectedIndex = {option_number};
+                        console.log("selected option {option_number} for ans_{i}");
                         return true;
                     }} else {{
-                        console.log("select option {option_number} not found");
+                        console.log("select ans_{i} not found or option {option_number} not available");
                         return false;
                     }}
                     """
                     print(script)
                     result = driver.execute_script(script)
                     print(result)
-                    time.sleep(1)
+                    time.sleep(0.5)
+    
+                driver.execute_script("chgAnswer();")
+                print("Вызван chgAnswer() для обновления результата")
 
             logger.info(f"Выбраны варианты: {option_numbers} для типа теста: {self.current_test_type}")
             return True
