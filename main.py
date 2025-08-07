@@ -2,6 +2,7 @@ import time
 import logging
 import json
 import requests
+import re
 from contextlib import contextmanager
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -46,38 +47,94 @@ class AITestSolver:
     def __init__(self, api_key=None):
         self.api_key = api_key or AI_api_key
         self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        self.current_test_type = None  
         logger.info("Инициализирован ИИ решатель тестов с AI API")
     
-    def extract_question_data(self, driver):
+    def determine_test_type(self, driver):
         try:
-            question_data = {
-                'question_text': '',
-                'options': [],
-                'question_type': 'multiple_choice'
-            }
-
-            try:
-                driver.switch_to.default_content()  
-                frame_main = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.NAME, "frame_main"))
-                )
-                driver.switch_to.frame(frame_main)
-            except Exception as e:
-                print(f"")
-
-            print("2: Ищу варианты ответов...")
-            option_elements = driver.find_elements(
-                By.XPATH, '//label[starts-with(@for, "rdo_")]'
+            self.current_test_type = None
+            
+            driver.switch_to.default_content()
+            frame_main = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "frame_main"))
             )
-            for element in option_elements:
-                print("нашёл вариант:", element.text.strip())
-                question_data['options'].append(element.text.strip())
-
-            print("3: Переключаюсь в inlist")
+            driver.switch_to.frame(frame_main)
+            
+            print("Определяем тип теста...")
+            
+            checkbox_elements = driver.find_elements(By.CLASS_NAME, "form_checkbox")
+            if checkbox_elements:
+                self.current_test_type = "checkbox"
+                print("Определен тип теста: CHECKBOX")
+                return "checkbox"
+            
+            radio_elements = driver.find_elements(By.CLASS_NAME, "form_radio")
+            if radio_elements:
+                self.current_test_type = "radio"
+                print("Определен тип теста: RADIO")
+                return "radio"
+            
             iframe_inlist = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.NAME, "inlist"))
             )
             driver.switch_to.frame(iframe_inlist)
+            
+            select_element = driver.find_element(By.ID, "ans_1")
+            if select_element and select_element.tag_name == "select":
+                self.current_test_type = "select"
+                print("Определен тип теста: SELECT")
+                return "select"
+                
+            self.current_test_type = "radio"
+            print("Тип теста не определен, используется по умолчанию: RADIO")
+            return "radio"
+            
+        except Exception as e:
+            print(f"Ошибка при определении типа теста: {e}")
+            self.current_test_type = "radio" 
+            return "radio"
+    
+    def extract_question_data(self, driver):
+        try:
+            test_type = self.determine_test_type(driver)
+            
+            question_data = {
+                'question_text': '',
+                'options': [],
+                'question_type': test_type
+            }
+
+            print("2: Ищу варианты ответов...")
+            
+            if test_type == "checkbox":
+                option_elements = driver.find_elements(
+                    By.XPATH, '//label[starts-with(@for, "chk_")]'
+                )
+                for element in option_elements:
+                    print("нашёл вариант (checkbox):", element.text.strip())
+                    question_data['options'].append(element.text.strip())
+                    
+            if test_type == "radio":      
+                option_elements = driver.find_elements(
+                    By.XPATH, '//label[starts-with(@for, "rdo_")]'
+                )
+                for element in option_elements:
+                    print("нашёл вариант (radio):", element.text.strip())
+                    question_data['options'].append(element.text.strip())
+                    
+            iframe_inlist = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "inlist"))
+            )
+            driver.switch_to.frame(iframe_inlist)
+                    
+            if test_type == "select":
+                print("Обрабатываем SELECT тест...")
+                select_element = driver.find_element(By.ID, "ans_1")
+                options = select_element.find_elements(By.TAG_NAME, "option")
+                for option in options:
+                    if option.text.strip(): 
+                        print("нашёл вариант (select):", option.text.strip())
+                        question_data['options'].append(option.text.strip())
 
             print("4: Ищу текст вопроса")
             question_elements = driver.find_elements(By.CLASS_NAME, "iframe_body")
@@ -97,17 +154,17 @@ class AITestSolver:
         try:
             if not question_data or not question_data['question_text'] or not question_data['options']:
                 logger.warning("Недостаточно данных для решения вопроса")
-                return 1
-            
+                return [1]
+
             options_text = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(question_data['options'])])
             prompt = f"""Ты эксперт по японским академическим тестам. Проанализируй вопрос и выбери правильный ответ.
 
-Вопрос: {question_data['question_text']}
+    Вопрос: {question_data['question_text']}
 
-Варианты ответов:
-{options_text}
+    Варианты ответов:
+    {options_text}
 
-Отвечай ТОЛЬКО номером правильного варианта (1, 2, 3 или 4). Никаких объяснений не нужно."""
+    Отвечай ТОЛЬКО номером правильного варианта (например: 1 2 4 или 1,3). Никаких объяснений не нужно."""
 
             request_data = {
                 "contents": [
@@ -120,93 +177,126 @@ class AITestSolver:
                     }
                 ]
             }
-            
+
             headers = {
                 'Content-Type': 'application/json',
                 'X-goog-api-key': self.api_key
             }
-            
+
             response = requests.post(self.api_url, headers=headers, json=request_data, timeout=30)
-            
+
             if response.status_code == 200:
                 result = response.json()
                 print("Ответ от ИИ: ", result)
-                
+
                 if 'candidates' in result and len(result['candidates']) > 0:
                     content = result['candidates'][0]['content']['parts'][0]['text'].strip()
                     
-                    # Извлекаем номер ответа
-                    try:
-                        selected_option = int(content)
-                        if 1 <= selected_option <= len(question_data['options']):
-                            logger.info(f"ии выбрал вариант {selected_option} из {len(question_data['options'])}")
-                            return selected_option
-                        else:
-                            logger.warning(f"AI вернул неверный номер: {selected_option}")
-                            return 1
-                    except ValueError:
-                        logger.warning(f"Не удалось извлечь номер из ответа AI: {content}")
-                        return 1
+                    numbers = [int(n) for n in re.findall(r'\d+', content)]
+                    valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
+
+                    if valid_numbers:
+                        logger.info(f"ИИ выбрал варианты: {valid_numbers}")
+                        return valid_numbers
+                    else:
+                        logger.warning(f"AI вернул неверные номера: {numbers}")
+                        return [1]
                 else:
                     logger.warning("Пустой ответ от AI API")
-                    return 1
+                    return [1]
             else:
                 logger.error(f"Ошибка AI API: {response.status_code} - {response.text}")
-                return 1
-                
+                return [1]
+
         except requests.exceptions.Timeout:
             logger.error("Таймаут при запросе к AI API")
-            return 1
+            return [1]
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка сети при обращении к AI API: {e}")
-            return 1
+            return [1]
         except Exception as e:
             logger.error(f"Неожиданная ошибка при решении вопроса через AI: {e}")
-            return 1
+            return [1]
     
-    def select_answer(self, driver, option_number):
-        while True:
-            try:
-                time.sleep(3)
-                
-                driver.switch_to.default_content()                                 
-                print("пытаемся перейти в фрейм_мейн")                                  
-                # frame_main = driver.find_element(By.NAME, "frame_main")            # только при поиске мы переходим на фрейм
-                # driver.switch_to.frame(frame_main)
-                frame_main = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.NAME, "frame_main"))
-                )
-                driver.switch_to.frame(frame_main)
-                print("попали)")
-                
-                script = f"""
-                var radios = document.getElementsByClassName("form_radio");
-                if (radios.length >= {option_number}) {{
-                    radios[{option_number - 1}].click();
-                    console.log("we in true");
-                    return true;
-                }} else {{
-                    console.log("we in false");
-                    return false;
-                }}
-                """
-                print(script)
-                result = driver.execute_script(script)
-                print(result)
-                time.sleep(10)
-                if result:
-                    logger.info(f"Выбран вариант ответа №{option_number} через click()")
-                    return True
-                else:
-                    logger.warning(f"Вариант №{option_number} не найден среди радио-кнопок")
-                    time.sleep(5)
-            except Exception as e:
-                logger.error(f"Ошибка при выборе ответа через click(): {e}")
-        print("Nakaaaaaaaaaaaanetsta!!!!!!!!!")
+    def select_answer(self, driver, option_numbers):
+        try:
+            time.sleep(3)
+            driver.switch_to.default_content()
+            print("пытаемся перейти в фрейм_мейн")
 
+            frame_main = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "frame_main"))
+            )
+            driver.switch_to.frame(frame_main)
+            print("попали)")
+
+            if self.current_test_type == "checkbox":
+                for option_number in option_numbers:
+                    script = f"""
+                    var checkboxes = document.getElementsByClassName("form_checkbox");
+                    if (checkboxes.length >= {option_number}) {{
+                        checkboxes[{option_number - 1}].click();
+                        console.log("clicked checkbox option {option_number}");
+                        return true;
+                    }} else {{
+                        console.log("checkbox option {option_number} not found");
+                        return false;
+                    }}
+                    """
+                    print(script)
+                    result = driver.execute_script(script)
+                    print(result)
+                    time.sleep(1)
+                    
+            elif self.current_test_type == "radio":
+                for option_number in option_numbers:
+                    script = f"""
+                    var radios = document.getElementsByClassName("form_radio");
+                    if (radios.length >= {option_number}) {{
+                        radios[{option_number - 1}].click();
+                        console.log("clicked radio option {option_number}");
+                        return true;
+                    }} else {{
+                        console.log("radio option {option_number} not found");
+                        return false;
+                    }}
+                    """
+                    print(script)
+                    result = driver.execute_script(script)
+                    print(result)
+                    time.sleep(1)
+                    
+            elif self.current_test_type == "select":
+                print("Обрабатываем SELECT выбор...")
+                for option_number in option_numbers:
+                    script = f"""
+                    var select = document.getElementById("ans_1");
+                    if (select && select.options.length >= {option_number}) {{
+                        select.selectedIndex = {option_number - 1};
+                        select.dispatchEvent(new Event('change'));
+                        console.log("selected option {option_number}");
+                        return true;
+                    }} else {{
+                        console.log("select option {option_number} not found");
+                        return false;
+                    }}
+                    """
+                    print(script)
+                    result = driver.execute_script(script)
+                    print(result)
+                    time.sleep(1)
+
+            logger.info(f"Выбраны варианты: {option_numbers} для типа теста: {self.current_test_type}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Ошибка при выборе ответов: {e}")
+            return False
     
     def submit_answer(self, driver):
         try:
+            self.current_test_type = None
+            
             driver.switch_to.default_content()                                 
             print("пытаемся перейти в фрейм_ктрл")                                  
             frame_ctrl = driver.find_element(By.NAME, "frame_ctrl")
@@ -256,7 +346,7 @@ class CampusAutomation:
         self.test_open_delay = 10
         self.test_delay = 5
         self.mode = mode
-        self.ai_solver = AITestSolver()  # Инициализация ИИ решателя
+        self.ai_solver = AITestSolver() 
 
     def setup_driver(self):
         try:
@@ -288,19 +378,19 @@ class CampusAutomation:
         try:
             self.driver.get("https://elcampus.otemae.ac.jp/")
 
-            # Ожидание поля логина
+            # ожидание поля логина
             login_field = WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.presence_of_element_located((By.NAME, "login_id"))
             )
             login_field.clear()
             login_field.send_keys(login)
 
-            # Ввод пароля
+            # ввод пароля
             password_field = self.driver.find_element(By.NAME, "login_pw")
             password_field.clear()
             password_field.send_keys(password)
 
-            # Нажатие кнопки входа
+            # нажатие кнопки входа
             login_button = self.driver.find_element(By.ID, "msg_btn_login")
             login_button.click()
 
@@ -323,16 +413,16 @@ class CampusAutomation:
                 home_link.click()
                 time.sleep(3)
 
-            # Ожидание списка предметов
+            # ожидание списка предметов
             portal_div = WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "subject_list"))
             )
 
-            # Поиск и клик по предмету
+            # поиск и клик по предмету
             lesson_link = portal_div.find_element(By.LINK_TEXT, subject_name)
             lesson_link.click()
 
-            # Переход к урокам
+            # переход к урокам
             lesson_tab = WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.element_to_be_clickable((By.LINK_TEXT, "授業"))
             )
@@ -384,7 +474,7 @@ class CampusAutomation:
     def video_window_context(self, original_window):
         video_window = None
         try:
-            # Поиск нового окна
+            # поиск нового окна
             for window_handle in self.driver.window_handles:
                 if window_handle != original_window:
                     video_window = window_handle
@@ -395,7 +485,7 @@ class CampusAutomation:
             yield video_window
 
         finally:
-            # Закрытие окна видео и возврат к основному
+            # закрытие окна видео и возврат к основному
             if video_window and video_window in self.driver.window_handles:
                 self.driver.close()
 
@@ -637,7 +727,7 @@ class CampusAutomation:
                                                 f"Нажата кнопка начала теста {tests_processed}: {test_title}"
                                             )
 
-                                            # Решение теста через ИИ
+                                            # решение теста через ИИ
                                             if self.solve_test_with_ai(test_title):
                                                 logger.info(
                                                     f"Тест {tests_processed} успешно решен через ИИ: {test_title}"
