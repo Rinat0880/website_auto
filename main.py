@@ -3,6 +3,7 @@ import logging
 import json
 import requests
 import re
+import sys 
 from contextlib import contextmanager
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -60,6 +61,17 @@ class AITestSolver:
             )
             driver.switch_to.frame(frame_main)
             
+            try:
+                is_text_answer = driver.execute_script("return typeof hasTextAnswer !== 'undefined' && hasTextAnswer === true;")
+                if is_text_answer:
+                    self.current_test_type = "text_answer"
+                    print("Определен тип теста: TEXT ANSWER - этот тип не поддерживается")
+                    logger.warning("Обнаружен тест с текстовым ответом, который не поддерживается")
+                    return "text_answer"
+            except Exception as e:
+                print(f"Ошибка при проверке на текстовый ответ: {e}")
+        
+            
             print("Определяем тип теста...")
             
             checkbox_elements = driver.find_elements(By.CLASS_NAME, "form_checkbox")
@@ -98,6 +110,14 @@ class AITestSolver:
         try:
             test_type = self.determine_test_type(driver)
             
+            # If this is a text answer test, return empty data to signal skipping
+            if test_type == "text_answer":
+                return {
+                    'question_text': 'TEXT_ANSWER_NOT_SUPPORTED',
+                    'options': [],
+                    'question_type': 'text_answer'
+                }
+                
             question_data = {
                 'question_text': '',
                 'options': [],
@@ -199,7 +219,7 @@ class AITestSolver:
 
                 if 'candidates' in result and len(result['candidates']) > 0:
                     content = result['candidates'][0]['content']['parts'][0]['text'].strip()
-                    
+
                     numbers = [int(n) for n in re.findall(r'\d+', content)]
                     valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
 
@@ -212,6 +232,10 @@ class AITestSolver:
                 else:
                     logger.warning("Пустой ответ от AI API")
                     return [1]
+
+            elif response.status_code == 429:
+                logger.error("Превышен дневной лимит (200 запросов) к Gemini API. Остановка всех тестов.")
+                sys.exit(1)
             else:
                 logger.error(f"Ошибка AI API: {response.status_code} - {response.text}")
                 return [1]
@@ -225,6 +249,7 @@ class AITestSolver:
         except Exception as e:
             logger.error(f"Неожиданная ошибка при решении вопроса через AI: {e}")
             return [1]
+
     
     def select_answer(self, driver, option_numbers):
         try:
@@ -312,13 +337,13 @@ class AITestSolver:
     def submit_answer(self, driver):
         try:
             self.current_test_type = None
-            
+
             driver.switch_to.default_content()                                 
             print("пытаемся перейти в фрейм_ктрл")                                  
             frame_ctrl = driver.find_element(By.NAME, "frame_ctrl")
             driver.switch_to.frame(frame_ctrl)
             print("попали)")
-            
+
             is_forward_enabled = driver.execute_script("""
                 const btn = document.getElementById('btn_enabled_forward');
                 return btn && btn.style.display === 'block';
@@ -327,24 +352,19 @@ class AITestSolver:
             if is_forward_enabled:
                 driver.execute_script("ctrlExecute('forward')")
                 logger.info("Выполнен переход на следующий вопрос")
+                time.sleep(1)
+                return "next_question" 
             else:
                 driver.execute_script("ctrlExecute('mark')")
                 logger.info("Последний вопрос — тест завершён и отправлен")
-            
+
                 WebDriverWait(driver, 5).until(EC.alert_is_present())
                 alert = driver.switch_to.alert
                 alert.accept()
                 logger.info("Alert с подтверждением принят")
-                
+
                 time.sleep(5)
-
-                driver.close()  
-
-                return True
-
-            time.sleep(1)  
-            return True
-            
+                return "test_completed" 
 
         except Exception as e:
             logger.error(f"Ошибка при переходе/отправке: {e}")
@@ -363,7 +383,8 @@ class CampusAutomation:
         self.test_delay = 5
         self.mode = mode
         self.ai_solver = AITestSolver() 
-
+        self.failed_tests = {}
+        
     def setup_driver(self):
         try:
             chrome_options = Options()
@@ -532,37 +553,57 @@ class CampusAutomation:
         try:
             questions_solved = 0
             max_questions = 50  
-            
+
             while questions_solved < max_questions:
                 question_data = self.ai_solver.extract_question_data(self.driver)
-                
+
+                if question_data and question_data['question_type'] == 'text_answer':
+                    logger.warning(f"Тест '{test_title}' содержит текстовые ответы, пропускаем")
+                    return "text_answer_skip"  
+
                 if not question_data or not question_data['question_text']:
                     logger.info("Вопросы закончились или тест завершен")
                     break
-                
-                selected_option = self.ai_solver.solve_question(question_data)
-                
+
+                try:
+                    selected_option = self.ai_solver.solve_question(question_data)
+                except RuntimeError as e:
+                    if str(e) == "Лимит исчерпан":
+                        logger.error("Остановка тестов из-за превышения дневного лимита Gemini API")
+                        return "quota_exceeded"
+                    else:
+                        raise  
+
                 if self.ai_solver.select_answer(self.driver, selected_option):
                     time.sleep(1)
-                    
-                    if self.ai_solver.submit_answer(self.driver):
+
+                    submit_result = self.ai_solver.submit_answer(self.driver)
+
+                    if submit_result == "next_question":
                         questions_solved += 1
                         logger.info(f"Решен вопрос {questions_solved} в тесте: {test_title}")
                         time.sleep(self.test_delay)
+                    elif submit_result == "test_completed":
+                        questions_solved += 1
+                        logger.info(f"Тест '{test_title}' завершен после {questions_solved} вопросов")
+                        return "completed"  
                     else:
                         logger.warning("Не удалось отправить ответ")
-                        break
+                        return "failed"  
                 else:
                     logger.warning("Не удалось выбрать ответ")
-                    break
-            
+                    return "failed"  
+
+            if questions_solved == 0:
+                return "failed"
+
             logger.info(f"Решено вопросов в тесте '{test_title}': {questions_solved}")
-            return questions_solved > 0
-            
+            return "completed" if questions_solved > 0 else "failed"
+
         except Exception as e:
             logger.error(f"Ошибка при решении теста через ИИ: {e}")
-            return False
-
+            return "failed"
+        
     def process_videos(self):
         try:
             WebDriverWait(self.driver, self.wait_timeout).until(
@@ -672,18 +713,22 @@ class CampusAutomation:
             logger.error(f"Критическая ошибка при обработке видео: {e}")
             return 0
 
-    def process_tests(self):
+    def process_tests(self, subject_name):
         try:
             WebDriverWait(self.driver, self.wait_timeout).until(
                 EC.presence_of_element_located(
                     (By.CSS_SELECTOR, "div.type_bt, div.type_bw")
                 )
             )
-
+    
+            if subject_name not in self.failed_tests:
+                self.failed_tests[subject_name] = []
+    
             tests_processed = 0
             consecutive_failures = 0
             max_consecutive_failures = 10
-
+            test_attempt_count = {}
+    
             while True:
                 try:
                     test_blocks = self.driver.find_elements(
@@ -691,40 +736,55 @@ class CampusAutomation:
                     )
                     found_unfinished = False
                     current_batch_unavailable = 0
-
+    
                     for block in test_blocks:
                         try:
                             icon_cell = block.find_element(
                                 By.CSS_SELECTOR, "td.state_iconl img"
                             )
                             src = icon_cell.get_attribute("src")
-
+    
                             contents_name_cell = block.find_element(
                                 By.CSS_SELECTOR, "td.contents_name a"
                             )
                             test_title = contents_name_cell.text.strip()
+    
+                            if test_title in self.failed_tests[subject_name]:
+                                logger.info(f"Пропускаем ранее неудачно решенный тест: {test_title}")
+                                continue
+    
+                            if test_title not in test_attempt_count:
+                                test_attempt_count[test_title] = 0
 
+                            test_attempt_count[test_title] += 1
+
+                            if test_attempt_count[test_title] > 1:  
+                                logger.warning(f"Превышено количество попыток для теста: {test_title}")
+                                self.failed_tests[subject_name].append(test_title)
+                                continue
+    
                             if (
                                 "sttop_iconl_yet.gif" in src
                                 or "sttop_iconl_notachieve.gif" in src
                             ):
                                 found_unfinished = True
                                 consecutive_failures = 0
-
+    
                                 tests_processed += 1
                                 logger.info(
                                     f"Найден незавершенный тест {tests_processed}: {test_title}"
                                 )
-
+    
                                 original_window = self.driver.current_window_handle
-
+    
                                 contents_name_cell.click()
                                 time.sleep(self.test_open_delay)
                                 
                                 WebDriverWait(self.driver, 10).until(lambda d: len(d.window_handles) > 1)
                                 new_window = [w for w in self.driver.window_handles if w != original_window][0]
                                 self.driver.switch_to.window(new_window)
-
+    
+                                test_success = False
                                 with self.test_window_context(original_window) as test_window:
                                     if test_window:
                                         try:
@@ -738,21 +798,22 @@ class CampusAutomation:
                                             )
                                             start_button_img.click()
                                             time.sleep(self.test_delay)
-
+    
                                             logger.info(
                                                 f"Нажата кнопка начала теста {tests_processed}: {test_title}"
                                             )
-
+    
                                             # решение теста через ИИ
-                                            if self.solve_test_with_ai(test_title):
-                                                logger.info(
-                                                    f"Тест {tests_processed} успешно решен через ИИ: {test_title}"
-                                                )
-                                            else:
-                                                logger.warning(
-                                                    f"Не удалось полностью решить тест {tests_processed}: {test_title}"
-                                                )
-
+                                            test_success = self.solve_test_with_ai(test_title)
+                                            if test_success == "completed":
+                                                logger.info(f"Тест {tests_processed} успешно решен через ИИ: {test_title}")
+                                            elif test_success == "text_answer_skip":
+                                                logger.warning(f"Тест '{test_title}' содержит текстовые ответы, добавляем в список неудачных")
+                                                self.failed_tests[subject_name].append(test_title)
+                                            else: 
+                                                logger.warning(f"Не удалось полностью решить тест {tests_processed}: {test_title}")
+                                                self.failed_tests[subject_name].append(test_title)
+    
                                         except TimeoutException:
                                             logger.warning(
                                                 f"Кнопка начала теста не найдена для: {test_title}"
@@ -763,20 +824,18 @@ class CampusAutomation:
                                                 f"Ошибка при выполнении теста {test_title}: {e}"
                                             )
                                             tests_processed -= 1
+                                            self.failed_tests[subject_name].append(test_title)
                                     else:
                                         logger.warning(
                                             f"Не удалось открыть тест {tests_processed}: {test_title}"
                                         )
                                         tests_processed -= 1
-
+                                        self.failed_tests[subject_name].append(test_title)
+    
+                                self.driver.refresh()
+                                time.sleep(3)
                                 break
-
-                            else:
-                                logger.debug(
-                                    f"Тест уже завершен, пропускаем: {test_title}"
-                                )
-                                continue
-
+    
                         except NoSuchElementException:
                             current_batch_unavailable += 1
                             continue
@@ -784,35 +843,35 @@ class CampusAutomation:
                             logger.error(f"Ошибка при обработке теста: {e}")
                             consecutive_failures += 1
                             continue
-
+    
                     if current_batch_unavailable > 0:
                         logger.debug(
                             f"Пропущено блоков без тестов или уже завершенных: {current_batch_unavailable}"
                         )
-
+    
                     if not found_unfinished:
                         logger.info("Все доступные тесты обработаны")
                         break
-
+    
                     if consecutive_failures >= max_consecutive_failures:
                         logger.warning(
                             f"Слишком много ошибок подряд ({consecutive_failures}). Завершение обработки."
                         )
                         break
-
+    
                 except Exception as e:
-                    logger.error(f"Ошибка при поиске тестов: {e}")
+                    logger.error(f"Ошибка во внутреннем цикле обработки тестов: {e}")
                     consecutive_failures += 1
                     if consecutive_failures >= max_consecutive_failures:
-                        logger.error(
-                            "Критическое количество ошибок. Прекращение обработки."
-                        )
                         break
-                    time.sleep(5)
-                    continue
-
+    
+            if self.failed_tests[subject_name]:
+                logger.warning(f"Не удалось решить {len(self.failed_tests[subject_name])} тестов в предмете '{subject_name}':")
+                for failed_test in self.failed_tests[subject_name]:
+                    logger.warning(f"  - {failed_test}")
+    
             return tests_processed
-
+    
         except Exception as e:
             logger.error(f"Критическая ошибка при обработке тестов: {e}")
             return 0
@@ -832,7 +891,7 @@ class CampusAutomation:
                 f"Просмотрено видео для предмета '{subject_name}': {processed_count}"
             )
         elif self.mode == "test":
-            processed_count = self.process_tests()
+            processed_count = self.process_tests(subject_name)
             logger.info(
                 f"Обработано тестов для предмета '{subject_name}': {processed_count}"
             )
@@ -852,6 +911,7 @@ class CampusAutomation:
 
             logger.info(f"Запуск автоматизации в режиме: {self.mode}")
             total_processed = 0
+            total_failed = 0
 
             for subject_index, subject_name in enumerate(subject_names):
                 is_first = subject_index == 0
@@ -864,7 +924,19 @@ class CampusAutomation:
             if self.mode == "video":
                 logger.info(f"Общее количество просмотренных видео: {total_processed}")
             elif self.mode == "test":
+                for subject, failed_tests in self.failed_tests.items():
+                    total_failed += len(failed_tests)
+                
                 logger.info(f"Общее количество обработанных тестов: {total_processed}")
+                logger.info(f"Общее количество непройденных тестов: {total_failed}")
+                
+                if total_failed > 0:
+                    logger.warning("Список всех непройденных тестов:")
+                    for subject, failed_tests in self.failed_tests.items():
+                        if failed_tests:
+                            logger.warning(f"  Предмет '{subject}' - {len(failed_tests)} тестов:")
+                            for test in failed_tests:
+                                logger.warning(f"    - {test}")
 
         except Exception as e:
             logger.error(f"Критическая ошибка: {e}")
