@@ -48,6 +48,7 @@ class AITestSolver:
     def __init__(self, api_key=None):
         self.api_key = api_key or AI_api_key
         self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        # self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.current_test_type = None  
         logger.info("Инициализирован ИИ решатель тестов с AI API")
     
@@ -193,6 +194,38 @@ class AITestSolver:
     {options_text}
 
     Отвечай ТОЛЬКО номером правильного варианта (например: 1 2 4 или 1,3). Никаких объяснений не нужно."""
+    
+            # request_data = {
+            #     "model": "deepseek/deepseek-r1:free",
+            #     "messages": [
+            #         {
+            #             "role": "user",
+            #             "content": prompt
+            #         }
+            #     ]
+            # }
+
+            # headers = {
+            #     'Content-Type': 'application/json',
+            #     'Authorization': f'Bearer {self.api_key}'
+            # }
+
+            # response = requests.post(self.api_url, headers=headers, json=request_data, timeout=30)
+
+            # if response.status_code == 200:
+            #     result = response.json()
+            #     print("Ответ от ИИ: ", result)
+
+            #     content = result['choices'][0]['message']['content'].strip()
+            #     numbers = [int(n) for n in re.findall(r'\d+', content)]
+            #     valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
+
+            #     if valid_numbers:
+            #         logger.info(f"ИИ выбрал варианты: {valid_numbers}")
+            #         return valid_numbers
+            #     else:
+            #         logger.warning(f"AI вернул неверные номера: {numbers}")
+            #         return [1]
 
             request_data = {
                 "contents": [
