@@ -18,7 +18,7 @@ python -m venv venv
 2. Активируй её:
 - Windows:
 ```bash
-source venv\Scripts\activate
+source venv/Scripts/activate
 ```
 
 3. Установи зависимости:
