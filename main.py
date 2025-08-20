@@ -776,33 +776,33 @@ class CampusAutomation:
                                 By.CSS_SELECTOR, "td.state_iconl img"
                             )
                             src = icon_cell.get_attribute("src")
-    
+
                             contents_name_cell = block.find_element(
                                 By.CSS_SELECTOR, "td.contents_name a"
                             )
                             test_title = contents_name_cell.text.strip()
-    
+
                             if test_title in self.failed_tests[subject_name]:
                                 logger.info(f"Пропускаем ранее неудачно решенный тест: {test_title}")
                                 continue
-    
-                            if test_title not in test_attempt_count:
-                                test_attempt_count[test_title] = 0
 
-                            test_attempt_count[test_title] += 1
-
-                            if test_attempt_count[test_title] > 1:  
-                                logger.warning(f"Превышено количество попыток для теста: {test_title}")
-                                self.failed_tests[subject_name].append(test_title)
-                                continue
-    
                             if (
                                 "sttop_iconl_yet.gif" in src
                                 or "sttop_iconl_notachieve.gif" in src
                             ):
+                                if test_title not in test_attempt_count:
+                                    test_attempt_count[test_title] = 0
+
+                                test_attempt_count[test_title] += 1
+
+                                if test_attempt_count[test_title] > 1:  
+                                    logger.warning(f"Превышено количество попыток для теста: {test_title}")
+                                    self.failed_tests[subject_name].append(test_title)
+                                    continue
+
                                 found_unfinished = True
                                 consecutive_failures = 0
-    
+
                                 tests_processed += 1
                                 logger.info(
                                     f"Найден незавершенный тест {tests_processed}: {test_title}"
