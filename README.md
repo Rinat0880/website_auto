@@ -36,10 +36,9 @@ https://googlechromelabs.github.io/chrome-for-testing/
 7. Создай файл `config.py` на основе `config_example.py`. Там уже прописаны все необходимые инструкции и параметры. Просто скопируй `config_example.py` и переименуй:
 ```bash
 copy config_example.py config.py   # Windows
-cp config_example.py config.py     # Linux/macOS
 ```
 
-8. Если у тебя есть API-ключ для **Google Gemini 2.0**, скрипт будет использовать его для прохождения тестов. Без него эта функция будет недоступна.
+8. Если у тебя есть API-ключ для **Google Gemini 2.0**, скрипт будет использовать его для прохождения тестов. Без него эта функция будет недоступна (можно получить бесплатно).
 
 ## Запуск
 
