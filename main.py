@@ -16,6 +16,32 @@ from selenium.common.exceptions import (
     TimeoutException,
     WebDriverException,
 )
+import shutil
+import subprocess
+from webdriver_manager.chrome import ChromeDriverManager
+import shutil
+
+def find_system_chromedriver():
+    """Ищем chromedriver в PATH или в стандартных локациях."""
+    candidates = [
+        shutil.which("chromedriver"),
+        "/usr/local/bin/chromedriver",
+        "/usr/bin/chromedriver",
+        "/opt/google/chrome/chromedriver",
+    ]
+    for p in candidates:
+        if p and shutil.os.path.exists(p):
+            return p
+    return None
+
+def find_chrome_binary():
+    """Пробуем найти бинарник Google Chrome / Chromium."""
+    for name in ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
 
 LOG_LEVEL = logging.INFO
 
@@ -418,30 +444,97 @@ class CampusAutomation:
         self.ai_solver = AITestSolver() 
         self.failed_tests = {}
         
+    def find_system_chromedriver():
+        """Ищем chromedriver в PATH или в стандартных локациях."""
+        candidates = [
+            shutil.which("chromedriver"),
+            "/usr/local/bin/chromedriver",
+            "/usr/bin/chromedriver",
+            "/opt/google/chrome/chromedriver",
+        ]
+        for p in candidates:
+            if p and shutil.os.path.exists(p):
+                return p
+        return None
+
+    def find_chrome_binary():
+        """Попробуем найти бинарник Google Chrome / Chromium."""
+        for name in ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser"):
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
+
     def setup_driver(self):
+        """
+        Попытки инициализации драйвера в порядке:
+        1) webdriver-manager (скачать подходящий chromedriver)
+        2) системный chromedriver (PATH или стандартные пути)
+        Если ни один вариант не сработал — логируем и возвращаем False.
+        """
         try:
             chrome_options = Options()
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.add_experimental_option(
-                "excludeSwitches", ["enable-automation"]
-            )
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option("useAutomationExtension", False)
-
             chrome_options.add_argument("--disable-popup-blocking")
             chrome_options.add_argument("--disable-default-apps")
             chrome_options.add_argument("--disable-notifications")
             chrome_options.add_argument("--disable-infobars")
             chrome_options.add_argument("--disable-translate")
+            chrome_options.add_argument("--headless=new")
 
-            service = Service(executable_path=self.chromedriver_path)
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.execute_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            # если есть бинарник хрома, укажем его (полезно на системах с нестандартным расположением)
+            chrome_bin = find_chrome_binary()
+            if chrome_bin:
+                chrome_options.binary_location = chrome_bin
+                logger.debug(f"Найден бинарник Chrome: {chrome_bin}")
+
+            # 1) Попробуем webdriver-manager (скачает подходящую версию chromedriver)
+            try:
+                driver_path = ChromeDriverManager().install()
+                logger.info(f"Используем chromedriver от webdriver-manager: {driver_path}")
+                service = Service(executable_path=driver_path)
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                # mask webdriver property
+                self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                logger.info("Драйвер успешно инициализирован через webdriver-manager")
+                return True
+            except Exception as e_wm:
+                logger.warning(f"webdriver-manager не сработал: {e_wm}. Попробуем системный chromedriver...")
+
+            # 2) Попробуем системный chromedriver (PATH или стандартные пути)
+            system_driver = find_system_chromedriver()
+            if system_driver:
+                try:
+                    logger.info(f"Пытаемся использовать системный chromedriver: {system_driver}")
+                    service = Service(executable_path=system_driver)
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                    self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    logger.info("Драйвер успешно инициализирован через системный chromedriver")
+                    return True
+                except Exception as e_sys:
+                    logger.error(f"Не удалось инициализировать системный chromedriver ({system_driver}): {e_sys}")
+
+            # Ничего не помогло — строим понятную подсказку пользователю
+            logger.error(
+                "Не удалось получить chromedriver. Возможные варианты решения:\n"
+                "  1) Установить chromedriver из репозитория/aur:\n"
+                "       sudo pacman -S chromedriver                # если доступно\n"
+                "       yay -S chromedriver                         # через AUR (Garuda)\n"
+                "  2) Установить chromedriver вручную (см. chrome-for-testing) и поместить в /usr/local/bin:\n"
+                "       wget <url-to-chromedriver.zip>\n"
+                "       unzip chromedriver-linux64.zip\n"
+                "       sudo mv chromedriver /usr/local/bin/\n"
+                "       sudo chmod +x /usr/local/bin/chromedriver\n"
+                "  3) Обновить webdriver-manager и selenium в venv:\n"
+                "       pip install -U webdriver-manager selenium\n"
+                "  4) Убедиться, что установлен Google Chrome и его путь обнаруживается (which google-chrome)\n"
             )
-            logger.info("Драйвер успешно инициализирован")
-            return True
+            return False
+
         except Exception as e:
-            logger.error(f"Ошибка при инициализации драйвера: {e}")
+            logger.error(f"Фатальная ошибка при инициализации драйвера: {e}")
             return False
 
     def login(self):
