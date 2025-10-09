@@ -34,3 +34,9 @@ mode = 'video'
 
 # пока скрипт решения тестов работает только с google gemini 2.0, если у вас есть другие api (лучше) можете в class aitestsolver init поменять url на свой и изменить структуру запроса в функции solvequestion
 AI_api_key = 'your_ai_api_key'
+
+
+
+
+# если True — chrome работает в фоновом режиме без GUI без отображения окна браузера, а если False показывается
+HEADLESS = True # False
