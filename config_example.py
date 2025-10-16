@@ -39,4 +39,4 @@ AI_api_key = 'your_ai_api_key'
 
 
 # если True — chrome работает в фоновом режиме без GUI без отображения окна браузера, а если False показывается
-HEADLESS = True # False
+HEADLESS = True # False1122
