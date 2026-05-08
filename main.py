@@ -73,8 +73,8 @@ class AITestSolver:
 
     def __init__(self, api_key=None):
         self.api_key = api_key or AI_api_key
-        self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        # self.api_url = "https://openrouter.ai/api/v1/chat/completions"   - если есть ключ от опенроутерапи то можете им пользоваться
+        # self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        self.api_url = "https://openrouter.ai/api/v1/chat/completions"   #- если есть ключ от опенроутерапи то можете им пользоваться
         self.current_test_type = None  
         logger.info("Инициализирован ИИ решатель тестов с AI API")
     
@@ -138,77 +138,101 @@ class AITestSolver:
             return "radio"
     
     def extract_question_data(self, driver):
-        """Извлечение данных вопроса и вариантов ответа"""
+        """Извлечение текста вопроса и вариантов ответа"""
         try:
             test_type = self.determine_test_type(driver)
-            
+
             # пропуск текстовых ответов
             if test_type == "text_answer":
                 return {
-                    'question_text': 'TEXT_ANSWER_NOT_SUPPORTED',
-                    'options': [],
-                    'question_type': 'text_answer'
+                    "question_text": "TEXT_ANSWER_NOT_SUPPORTED",
+                    "options": [],
+                    "question_type": "text_answer",
                 }
-                
+
             question_data = {
-                'question_text': '',
-                'options': [],
-                'question_type': test_type
+                "question_text": "",
+                "options": [],
+                "question_type": test_type,
             }
 
-            # переход к frame_main
+            logger.info("Переход в frame_main")
             driver.switch_to.default_content()
+
             frame_main = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.NAME, "frame_main"))
             )
-            driver.switch_to.frame(frame_main) 
-            
-            # извлечение вариантов ответа
+            driver.switch_to.frame(frame_main)
+
+            # ===== ВЫТАСКИВАЕМ ВАРИАНТЫ =====
             if test_type == "checkbox":
-                option_elements = driver.find_elements(
-                    By.XPATH, '//label[starts-with(@for, "chk_")]'
+                option_elements = WebDriverWait(driver, 10).until(
+                    EC.presence_of_all_elements_located(
+                        (By.XPATH, '//label[starts-with(@for, "chk_")]')
+                    )
                 )
-                for element in option_elements:
-                    question_data['options'].append(element.text.strip())
-                    
-            elif test_type == "radio":      
-                option_elements = driver.find_elements(
-                    By.XPATH, '//label[starts-with(@for, "rdo_")]'
+                question_data["options"] = [
+                    el.text.strip() for el in option_elements if el.text.strip()
+                ]
+
+            elif test_type == "radio":
+                option_elements = WebDriverWait(driver, 10).until(
+                    EC.presence_of_all_elements_located(
+                        (By.XPATH, '//label[starts-with(@for, "rdo_")]')
+                    )
                 )
-                for element in option_elements:
-                    question_data['options'].append(element.text.strip())
-                    
+                question_data["options"] = [
+                    el.text.strip() for el in option_elements if el.text.strip()
+                ]
+
             elif test_type == "select":
                 iframe_inlist = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.NAME, "inlist"))
                 )
                 driver.switch_to.frame(iframe_inlist)
-                
-                script = "return document.getElementById('ans_1').length"
-                len_options = driver.execute_script(script)
-                
+
+                len_options = driver.execute_script(
+                    "return document.getElementById('ans_1').length"
+                )
+
                 for i in range(1, len_options):
-                    script = f"return document.getElementById('ans_1')[{i}].text"
-                    option_text = driver.execute_script(script)
-                    question_data['options'].append(option_text)
-                
-                # возврат к frame_main для извлечения текста вопроса (потому что на строчке 182 мы заходили в фрейм инлист)
-                driver.switch_to.default_content()
-                driver.switch_to.frame(frame_main)
+                    option_text = driver.execute_script(
+                        f"return document.getElementById('ans_1')[{i}].text"
+                    )
+                    if option_text.strip():
+                        question_data["options"].append(option_text.strip())
 
-            # извлечение текста вопроса
-            question_elements = driver.find_elements(By.CLASS_NAME, "iframe_body")
-            if question_elements:
-                question_data['question_text'] = question_elements[0].text.strip()
+                # после select возвращаемся в frame_main
+                driver.switch_to.parent_frame()
 
-            logger.debug(f"Извлечены данные вопроса: {question_data['question_type']}, "
-                        f"{len(question_data['options'])} вариантов")
+            # ===== ВЫТАСКИВАЕМ ТЕКСТ ВОПРОСА ИЗ inlist =====
+            logger.info("Извлечение текста вопроса из inlist")
+
+            iframe_inlist = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "inlist"))
+            )
+            driver.switch_to.frame(iframe_inlist)
+
+            question_body = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            question_data["question_text"] = question_body.text.strip()
+
+            logger.info(
+                f"Извлечен вопрос: {question_data['question_text'][:80]}..."
+            )
+            logger.info(
+                f"Тип: {question_data['question_type']}, "
+                f"вариантов: {len(question_data['options'])}"
+            )
+
             return question_data
 
         except Exception as e:
             logger.error(f"Ошибка при извлечении данных вопроса: {type(e)} — {e}")
             return None
-    
+
     def solve_question(self, question_data):
         """Решение вопроса через AI API"""
         try:
@@ -217,88 +241,90 @@ class AITestSolver:
                 return [1]
 
             options_text = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(question_data['options'])])
-            prompt = f"""Ты эксперт по японским академическим тестам. Проанализируй вопрос и выбери правильный ответ.
+            prompt = f"""You are an expert in Japanese academic testing. Analyze the following question and select the correct answer(s).
 
-Вопрос: {question_data['question_text']}
+Question: {question_data['question_text']}
 
-Варианты ответов:
+Options:
 {options_text}
 
-    Отвечай ТОЛЬКО номером правильного варианта (например: 1 2 4 или 1,3). Никаких объяснений не нужно."""
-    
-            # request_data = {
-                # "model": "deepseek/deepseek-r1:free",                                                              #----это для опенроутер апи
-            #     "messages": [
-            #         {
-            #             "role": "user",
-            #             "content": prompt
-            #         }
-            #     ]
-            # }
-
-            # headers = {
-            #     'Content-Type': 'application/json',
-            #     'Authorization': f'Bearer {self.api_key}'
-            # }
-
-            # response = requests.post(self.api_url, headers=headers, json=request_data, timeout=30)
-
-            # if response.status_code == 200:
-            #     result = response.json()
-            #     print("Ответ от ИИ: ", result)
-
-            #     content = result['choices'][0]['message']['content'].strip()
-            #     numbers = [int(n) for n in re.findall(r'\d+', content)]
-            #     valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
-
-            #     if valid_numbers:
-            #         logger.info(f"ИИ выбрал варианты: {valid_numbers}")
-            #         return valid_numbers
-            #     else:
-            #         logger.warning(f"AI вернул неверные номера: {numbers}")
-            #         return [1]
+Output ONLY the number(s) of the correct option(s) (e.g., "1", "2 4", or "1,3"). 
+Strictly NO explanations, NO introductory text, and NO markdown. Just the numbers."""
 
             request_data = {
-                "contents": [
+                "model": "google/gemma-3-12b-it:free",
+                "messages": [
                     {
-                        "parts": [
-                            {
-                                "text": prompt
-                            }
-                        ]
+                        "role": "user",
+                        "content": prompt
                     }
                 ]
             }
 
             headers = {
                 'Content-Type': 'application/json',
-                'X-goog-api-key': self.api_key
+                'Authorization': f'Bearer {self.api_key}'
             }
 
             response = requests.post(self.api_url, headers=headers, json=request_data, timeout=30)
 
             if response.status_code == 200:
                 result = response.json()
-                
-                if 'candidates' in result and len(result['candidates']) > 0:
-                    content = result['candidates'][0]['content']['parts'][0]['text'].strip()
-                    
-                    numbers = [int(n) for n in re.findall(r'\d+', content)]
-                    valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
+                print("Ответ от ИИ: ", result)
 
-                    if valid_numbers:
-                        logger.info(f"ИИ выбрал варианты: {valid_numbers}")
-                        return valid_numbers
-                    else:
-                        logger.warning(f"AI вернул неверные номера: {numbers}")
-                        return [1]
+                content = result['choices'][0]['message']['content'].strip()
+                numbers = [int(n) for n in re.findall(r'\d+', content)]
+                valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
+
+                if valid_numbers:
+                    logger.info(f"ИИ выбрал варианты: {valid_numbers}")
+                    return valid_numbers
                 else:
-                    logger.warning("Пустой ответ от AI API")
+                    logger.warning(f"AI вернул неверные номера: {numbers}")
                     return [1]
 
+            # request_data = {
+            #     "contents": [
+            #         {
+            #             "parts": [
+            #                 {
+            #                     "text": prompt
+            #                 }
+            #             ]
+            #         }
+            #     ]
+            # }
+
+            # headers = {
+            #     'Content-Type': 'application/json',
+            #     'X-goog-api-key': self.api_key
+            # }
+
+            # response = requests.post(self.api_url, headers=headers, json=request_data, timeout=30)
+
+            # if response.status_code == 200:
+            #     result = response.json()
+                
+            #     if 'candidates' in result and len(result['candidates']) > 0:
+            #         content = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                    
+            #         numbers = [int(n) for n in re.findall(r'\d+', content)]
+            #         valid_numbers = [n for n in numbers if 1 <= n <= len(question_data['options'])]
+
+            #         if valid_numbers:
+            #             logger.info(f"ИИ выбрал варианты: {valid_numbers}")
+            #             return valid_numbers
+            #         else:
+            #             logger.warning(f"AI вернул неверные номера: {numbers}")
+            #             return [1]
+                # else:
+                #     logger.warning("Пустой ответ от AI API")
+                #     return [1]
+
             elif response.status_code == 429:
-                logger.error("Превышен дневной лимит (200 запросов) к Gemini API. Остановка всех тестов.")
-                sys.exit(1)
+                logger.error(f"429 Gemini error: {response.text}")
+                time.sleep(10)
+                return [1]
             else:
                 logger.error(f"Ошибка AI API: {response.status_code} - {response.text}")
                 return [1]
@@ -378,38 +404,33 @@ class AITestSolver:
             return False
     
     def submit_answer(self, driver):
-        """Отправка ответа и переход к следующему вопросу"""
         try:
-            self.current_test_type = None
-
+            time.sleep(0.5) 
+            
             driver.switch_to.default_content()
-            frame_ctrl = driver.find_element(By.NAME, "frame_ctrl")
-            driver.switch_to.frame(frame_ctrl)
+            driver.switch_to.frame(driver.find_element(By.NAME, "frame_ctrl"))
 
             is_forward_enabled = driver.execute_script("""
-                const btn = document.getElementById('btn_enabled_forward');
-                return btn && btn.style.display === 'block';
+                return document.getElementById('btn_enabled_forward').style.display === 'block';
             """)
 
             if is_forward_enabled:
                 driver.execute_script("ctrlExecute('forward')")
-                logger.info("Выполнен переход на следующий вопрос")
                 time.sleep(1)
                 return "next_question" 
             else:
+                # Конец теста
                 driver.execute_script("ctrlExecute('mark')")
-                logger.info("Последний вопрос — тест завершён и отправлен")
-
-                WebDriverWait(driver, 5).until(EC.alert_is_present())
-                alert = driver.switch_to.alert
-                alert.accept()
-                logger.info("Alert с подтверждением принят")
-
-                time.sleep(5)
+                time.sleep(2)
+                
+                # Выходим из фрейма и жмем кнопку в модалке
+                driver.switch_to.default_content()
+                driver.execute_script("document.getElementById('modalDialogOkBtn').click();")
+                
                 return "test_completed" 
 
         except Exception as e:
-            logger.error(f"Ошибка при переходе/отправке: {e}")
+            print(f"Ошибка: {e}")
             return False
 
 # ============= КЛАСС АВТОМАТИЗАЦИИ =============
