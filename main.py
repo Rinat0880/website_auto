@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # ============= ИМПОРТ КОНФИГУРАЦИИ =============
 
 try:
-    from config import login, password, subject_names, mode, AI_api_key, HEADLESS
+    from config import login, password, subject_names, mode, AI_api_key, model, HEADLESS
 except ImportError:
     logger.error(
         "Не удалось импортировать config.py. Проверьте наличие файла и параметров."
@@ -252,7 +252,7 @@ Output ONLY the number(s) of the correct option(s) (e.g., "1", "2 4", or "1,3").
 Strictly NO explanations, NO introductory text, and NO markdown. Just the numbers."""
 
             request_data = {
-                "model": "google/gemma-3-12b-it:free",
+                "model": model,
                 "messages": [
                     {
                         "role": "user",
@@ -405,29 +405,44 @@ Strictly NO explanations, NO introductory text, and NO markdown. Just the number
     
     def submit_answer(self, driver):
         try:
-            time.sleep(0.5) 
-            
+            time.sleep(0.5)
+
+            driver.switch_to.default_content()
+            driver.switch_to.frame(driver.find_element(By.NAME, "frame_main"))
+    
+            title_text = driver.find_element(By.CLASS_NAME, "common_title").text
+
+            numbers = re.findall(r'\d+', title_text)
+
+            current_question = int(numbers[0])
+            total_questions = int(numbers[1])
+
+            is_last_question = current_question >= total_questions
+
             driver.switch_to.default_content()
             driver.switch_to.frame(driver.find_element(By.NAME, "frame_ctrl"))
 
-            is_forward_enabled = driver.execute_script("""
-                return document.getElementById('btn_enabled_forward').style.display === 'block';
-            """)
-
-            if is_forward_enabled:
+            if not is_last_question:
                 driver.execute_script("ctrlExecute('forward')")
                 time.sleep(1)
-                return "next_question" 
+                return "next_question"
+
             else:
                 # Конец теста
                 driver.execute_script("ctrlExecute('mark')")
-                time.sleep(2)
-                
+                logger.info("najali na sdachu teper podtverdit")
+                time.sleep(1)
+
                 # Выходим из фрейма и жмем кнопку в модалке
                 driver.switch_to.default_content()
-                driver.execute_script("document.getElementById('modalDialogOkBtn').click();")
-                
-                return "test_completed" 
+                driver.switch_to.frame(driver.find_element(By.NAME, "frame_main"))
+
+                submit_button = driver.find_element(By.ID, "modalDialogOkBtn")
+                submit_button.click()
+
+                time.sleep(1)
+
+                return "test_completed"
 
         except Exception as e:
             print(f"Ошибка: {e}")
@@ -648,7 +663,6 @@ class CampusAutomation:
 
                     if submit_result == "next_question":
                         questions_solved += 1
-                        logger.info(f"Решен вопрос {questions_solved}/{max_questions}")
                         time.sleep(self.test_delay)
                     elif submit_result == "test_completed":
                         questions_solved += 1

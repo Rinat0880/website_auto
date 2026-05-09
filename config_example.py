@@ -34,7 +34,7 @@ mode = 'video'
 
 # пока скрипт решения тестов работает только с google gemini 2.0, если у вас есть другие api (лучше) можете в class aitestsolver init поменять url на свой и изменить структуру запроса в функции solvequestion
 AI_api_key = 'your_ai_api_key'
-
+model = "your_model_name"  #если используете openrouter.ai
 
 
 
